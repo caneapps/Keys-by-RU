@@ -1,0 +1,115 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --sat: env(safe-area-inset-top, 0px);
+    --sab: env(safe-area-inset-bottom, 0px);
+    --sal: env(safe-area-inset-left, 0px);
+    --sar: env(safe-area-inset-right, 0px);
+
+    /* Dynamic Neon Studio Theme Tokens (Default: Signature Pink) */
+    --brand-primary: #FF1E8E;
+    --brand-primary-rgb: 255, 30, 142;
+    --brand-secondary: #B829FF;
+    --brand-secondary-rgb: 184, 41, 255;
+    --brand-glow: 0 0 16px rgba(255, 30, 142, 0.45);
+    --surface-elevated: #161021;
+  }
+
+  [data-theme="signature-pink"] {
+    --brand-primary: #FF1E8E;
+    --brand-primary-rgb: 255, 30, 142;
+    --brand-secondary: #B829FF;
+    --brand-secondary-rgb: 184, 41, 255;
+    --brand-glow: 0 0 16px rgba(255, 30, 142, 0.45);
+    --surface-elevated: #161021;
+  }
+
+  [data-theme="neon-green"] {
+    --brand-primary: #00FF87;
+    --brand-primary-rgb: 0, 255, 135;
+    --brand-secondary: #00B862;
+    --brand-secondary-rgb: 0, 184, 98;
+    --brand-glow: 0 0 16px rgba(0, 255, 135, 0.45);
+    --surface-elevated: #0D1D17;
+  }
+
+  [data-theme="cyber-yellow"] {
+    --brand-primary: #FFE600;
+    --brand-primary-rgb: 255, 230, 0;
+    --brand-secondary: #FF9900;
+    --brand-secondary-rgb: 255, 153, 0;
+    --brand-glow: 0 0 16px rgba(255, 230, 0, 0.45);
+    --surface-elevated: #1F1B0D;
+  }
+
+  [data-theme="electric-blue"] {
+    --brand-primary: #00F0FF;
+    --brand-primary-rgb: 0, 240, 255;
+    --brand-secondary: #2563EB;
+    --brand-secondary-rgb: 37, 99, 235;
+    --brand-glow: 0 0 16px rgba(0, 240, 255, 0.45);
+    --surface-elevated: #0D1924;
+  }
+
+  [data-theme="deep-purple"] {
+    --brand-primary: #B829FF;
+    --brand-primary-rgb: 184, 41, 255;
+    --brand-secondary: #7C3AED;
+    --brand-secondary-rgb: 124, 58, 237;
+    --brand-glow: 0 0 16px rgba(184, 41, 255, 0.45);
+    --surface-elevated: #180F26;
+  }
+
+  [data-theme="chrome-silver"] {
+    --brand-primary: #F1F5F9;
+    --brand-primary-rgb: 241, 245, 249;
+    --brand-secondary: #94A3B8;
+    --brand-secondary-rgb: 148, 163, 184;
+    --brand-glow: 0 0 16px rgba(241, 245, 249, 0.45);
+    --surface-elevated: #161920;
+  }
+
+  [data-theme="crimson-red"] {
+    --brand-primary: #FF1E42;
+    --brand-primary-rgb: 255, 30, 66;
+    --brand-secondary: #FF5E00;
+    --brand-secondary-rgb: 255, 94, 0;
+    --brand-glow: 0 0 16px rgba(255, 30, 66, 0.45);
+    --surface-elevated: #210E12;
+  }
+
+  html, body, #root {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    background-color: #0B0710;
+    color: #f8fafc;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+
+  h1, h2, h3, h4, .font-heading {
+    font-family: 'Outfit', 'Inter', sans-serif;
+  }
+
+  .font-mono, [class*="font-mono"] {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Custom scrollbar styling */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

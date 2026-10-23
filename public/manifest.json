@@ -1,0 +1,45 @@
+{
+  "id": "keys-by-ru-app",
+  "name": "Keys by Ru - Piano & Music Studio",
+  "short_name": "Keys by Ru",
+  "description": "Mobile-first piano learning and creative music production studio for iPhone with guided curriculum, falling-notes practice, and beat making.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0B0710",
+  "theme_color": "#0B0710",
+  "lang": "en-GB",
+  "categories": [
+    "music",
+    "education",
+    "entertainment",
+    "productivity"
+  ],
+  "icons": [
+    {
+      "src": "./logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "./pwa-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Keys by Ru",
+  "description": "Mobile-first piano learning and creative music production studio for iPhone with guided curriculum, falling-notes practice, and beat making.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
