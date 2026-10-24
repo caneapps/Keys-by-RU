@@ -6,6 +6,7 @@
  */
 
 import { GoogleGenAI } from '@google/genai';
+import { SessionTelemetry } from './performanceGrader.ts';
 
 class GeminiCoachService {
   private client: GoogleGenAI | null = null;
@@ -22,6 +23,55 @@ class GeminiCoachService {
   }
 
   /**
+   * Analyzes structured session telemetry and returns an encouraging 2-3 sentence coaching critique.
+   */
+  async analyzeSessionTelemetry(telemetry: SessionTelemetry): Promise<string> {
+    if (this.client) {
+      try {
+        const weakBarsStr = telemetry.weakBars.length > 0
+          ? `Weak bars: ${telemetry.weakBars.map((b) => `Bar ${b}`).join(', ')}`
+          : 'None (consistent performance across all bars)';
+        const accidentalsStr = telemetry.missedAccidentals.length > 0
+          ? `Missed accidentals: ${telemetry.missedAccidentals.join(', ')}`
+          : 'None';
+
+        const prompt = `You are Ru, an expert British piano coach and modern music producer.
+Review this student session telemetry for "${telemetry.songOrLessonTitle}":
+- Practice Mode: ${telemetry.mode === 'tempo' ? `Tempo Mode (${telemetry.bpm} BPM)` : 'Smart Wait Mode'}
+- Overall Accuracy: ${telemetry.accuracyPercent}%
+- Timing breakdown: Perfect: ${telemetry.timingBreakdown.perfect}, Good: ${telemetry.timingBreakdown.good}, Early: ${telemetry.timingBreakdown.early}, Late: ${telemetry.timingBreakdown.late}, Missed: ${telemetry.timingBreakdown.missed}
+- Average Hesitation: ${telemetry.averageHesitationMs}ms
+- ${weakBarsStr}
+- ${accidentalsStr}
+
+Give an encouraging, pedagogical critique in 2-3 concise sentences in British English.
+Identify why a transition in the weak bars may have faltered (e.g. finger thumb-under crossing or sharp accidental reach), recommend a specific hand posture adjustment, and suggest the ideal next step (e.g. looping the weak bars at 60% tempo).`;
+
+        const response = await this.client.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: prompt,
+        });
+
+        if (response.text) return response.text.trim();
+      } catch (err) {
+        console.warn('Gemini telemetry critique fallback:', err);
+      }
+    }
+
+    // High quality deterministic fallback in British English
+    if (telemetry.accuracyPercent >= 90) {
+      return `Brilliant execution across "${telemetry.songOrLessonTitle}"! Your finger rhythm was delightfully synchronised with minimal hesitation. Ready to increase tempo by 10% or add the left-hand bass progression!`;
+    } else if (telemetry.weakBars.length > 0) {
+      const firstWeak = telemetry.weakBars[0];
+      return `Solid work overall (${telemetry.accuracyPercent}%), though Bar ${firstWeak} threw off your momentum. Keep your wrist supple and anticipate the finger shift a beat earlier. Try looping Bar ${firstWeak} at 60% tempo before running the whole piece again.`;
+    } else if (telemetry.missedAccidentals.length > 0) {
+      return `Great steady tempo! Notice how ${telemetry.missedAccidentals.join(', ')} requires your finger to curve slightly forward onto the black key. Keep your knuckle arch high so you don't catch the neighbouring white key.`;
+    } else {
+      return `Good effort! You're building solid keyboard muscle memory. Keep your fingers gently curved like resting on a tennis ball and take the transitions at a relaxed 60% pace.`;
+    }
+  }
+
+  /**
    * Explains performance mistakes and gives motivational advice in British English.
    */
   async explainMistakes(sessionData: {
@@ -33,7 +83,7 @@ class GeminiCoachService {
     if (this.client) {
       try {
         const response = await this.client.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.8-flash',
           contents: `You are Ru, a friendly and encouraging British piano teacher and music producer.
 Review this practice session for the lesson "${sessionData.lessonTitle}":
 - Accuracy: ${sessionData.accuracy}%
@@ -65,7 +115,7 @@ Provide a short, constructive 2-3 sentence tip in British English on how the stu
     if (this.client) {
       try {
         const response = await this.client.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.8-flash',
           contents: `Suggest a 4-chord progression and walking or 808 bass motif in the key of ${key} with a ${mood} vibe for an iPhone beatmaker.
 Format JSON only with keys: chords (array of 4 chord names), bassLine (text description of root notes), explanation (1 sentence).`,
         });

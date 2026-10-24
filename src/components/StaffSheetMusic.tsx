@@ -12,6 +12,7 @@ interface StaffSheetMusicProps {
   timeSignature?: string;
   keySignature?: string;
   onSelectNote?: (index: number) => void;
+  lastFeedback?: 'perfect' | 'good' | 'miss' | null;
 }
 
 export const StaffSheetMusic: React.FC<StaffSheetMusicProps> = ({
@@ -23,6 +24,7 @@ export const StaffSheetMusic: React.FC<StaffSheetMusicProps> = ({
   timeSignature = '4/4',
   keySignature = 'C Major',
   onSelectNote,
+  lastFeedback = null,
 }) => {
   // Line positions for Treble staff (F5 down to E4)
   // Midi mapping for staff line positioning
@@ -143,20 +145,46 @@ export const StaffSheetMusic: React.FC<StaffSheetMusicProps> = ({
                     <View
                       className={`w-4 h-3 rounded-full border shadow-sm transition-colors ${
                         isCurrent
-                          ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-900'
+                          ? lastFeedback === 'perfect'
+                            ? 'ring-2 ring-emerald-400 ring-offset-2 ring-offset-slate-900 shadow-[0_0_12px_rgba(16,185,129,0.7)]'
+                            : lastFeedback === 'miss'
+                            ? 'ring-2 ring-rose-500 ring-offset-2 ring-offset-slate-900 shadow-[0_0_12px_rgba(239,68,68,0.7)]'
+                            : 'ring-2 ring-white ring-offset-2 ring-offset-slate-900'
                           : isPast
                           ? 'opacity-60'
                           : ''
                       }`}
                       style={{
-                        backgroundColor: isCurrent ? '#ffffff' : noteColour,
-                        borderColor: isCurrent ? '#38bdf8' : '#1e293b',
+                        backgroundColor: isCurrent
+                          ? lastFeedback === 'perfect'
+                            ? '#10B981'
+                            : lastFeedback === 'miss'
+                            ? '#EF4444'
+                            : '#ffffff'
+                          : noteColour,
+                        borderColor: isCurrent
+                          ? lastFeedback === 'perfect'
+                            ? '#059669'
+                            : lastFeedback === 'miss'
+                            ? '#DC2626'
+                            : 'var(--brand-primary)'
+                          : '#1e293b',
                         transform: 'rotate(-20deg)',
                       }}
                     />
 
                     {/* Note Stem */}
-                    <View className="absolute right-0 bottom-1.5 w-[2px] h-7 bg-slate-300" />
+                    <View
+                      className="absolute right-0 bottom-1.5 w-[2px] h-7"
+                      style={{
+                        backgroundColor:
+                          isCurrent && lastFeedback === 'perfect'
+                            ? '#10B981'
+                            : isCurrent && lastFeedback === 'miss'
+                            ? '#EF4444'
+                            : '#cbd5e1',
+                      }}
+                    />
 
                     {/* Note Name Label */}
                     {showNoteNames && (

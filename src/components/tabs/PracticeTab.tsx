@@ -7,8 +7,28 @@ import { PUBLIC_DOMAIN_SONGS } from '../../data/curriculum.ts';
 import { Song, PracticeNote, HandType, UserProfile } from '../../types/index.ts';
 import { audioEngine } from '../../audio/audioEngine.ts';
 import { metronome } from '../../audio/metronome.ts';
-import { pitchDetector, PitchDetectionResult } from '../../audio/pitchDetection.ts';
-import { calculateStars, calculateXpReward, getScaleNotes, getChordNotes } from '../../utils/musicLogic.ts';
+import {
+  audioInputEngine,
+  SpectralAnalysisResult,
+  MidiDeviceState,
+} from '../../services/audioInputEngine.ts';
+import {
+  performanceGrader,
+  SessionTelemetry,
+  PerformanceGrader,
+  MusicalDiagnosis,
+} from '../../services/performanceGrader.ts';
+import {
+  calculateStars,
+  calculateXpReward,
+  getScaleNotes,
+  getChordNotes,
+  getPitchCorrectionGuidance,
+  PitchCorrectionGuidance,
+} from '../../utils/musicLogic.ts';
+import { MicrophoneCalibrationBar } from '../MicrophoneCalibrationBar.tsx';
+import { AudioCalibrationDrawer } from '../AudioCalibrationDrawer.tsx';
+import { PerformanceBreakdownModal } from '../PerformanceBreakdownModal.tsx';
 import {
   Play,
   Pause,
@@ -22,6 +42,12 @@ import {
   Compass,
   Headphones,
   Check,
+  AlertCircle,
+  AlertTriangle,
+  CheckCircle2,
+  ChevronRight,
+  TrendingUp,
+  Cable,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -53,9 +79,35 @@ export const PracticeTab: React.FC<PracticeTabProps> = ({
   const [correctHits, setCorrectHits] = useState<number>(0);
   const [totalAttempts, setTotalAttempts] = useState<number>(0);
 
+  // Pitch Correction & Real-time guidance
+  const [correctionGuidance, setCorrectionGuidance] = useState<PitchCorrectionGuidance | null>(null);
+  const [currentWrongNote, setCurrentWrongNote] = useState<string | null>(null);
+
+  // Tempo Mode Detailed Timing & Problem Bars Tracker
+  const [tempoStats, setTempoStats] = useState<{
+    perfect: number;
+    early: number;
+    late: number;
+    missed: number;
+    problemBars: Array<{ bar: number; expectedNote: string; playedNote: string; issue: string; advice: string }>;
+  }>({
+    perfect: 0,
+    early: 0,
+    late: 0,
+    missed: 0,
+    problemBars: [],
+  });
+  const [showTempoSummaryModal, setShowTempoSummaryModal] = useState<boolean>(false);
+
+  // Advanced DSP & Telemetry state
+  const [spectralAnalysis, setSpectralAnalysis] = useState<SpectralAnalysisResult | null>(null);
+  const [showCalibrationDrawer, setShowCalibrationDrawer] = useState<boolean>(false);
+  const [sessionTelemetry, setSessionTelemetry] = useState<SessionTelemetry | null>(null);
+  const [showTelemetryModal, setShowTelemetryModal] = useState<boolean>(false);
+
   // Microphone pitch detection state
   const [isMicActive, setIsMicActive] = useState<boolean>(false);
-  const [detectedPitch, setDetectedPitch] = useState<PitchDetectionResult | null>(null);
+  const [audioLevel, setAudioLevel] = useState<number>(0);
 
   // Sub-views: 'song_practice' | 'ear_training' | 'theory_tools'
   const [activeSubView, setActiveSubView] = useState<'song_practice' | 'ear_training' | 'theory_tools'>('song_practice');
@@ -98,27 +150,58 @@ export const PracticeTab: React.FC<PracticeTabProps> = ({
     }
   };
 
-  // Toggle Microphone Pitch Detection
+  // Clean up audio engine on unmount
+  useEffect(() => {
+    return () => {
+      audioInputEngine.stopMicrophone();
+    };
+  }, []);
+
+  // Sync expected notes to audio input engine for spectral template matching
+  useEffect(() => {
+    const currentTarget = selectedSong.notes[currentNoteIndex]?.note;
+    if (currentTarget) {
+      audioInputEngine.setExpectedNotes([currentTarget]);
+    }
+  }, [selectedSong, currentNoteIndex]);
+
+  // Toggle Advanced DSP Microphone Recognition
   const toggleMicListening = async () => {
     if (isMicActive) {
-      pitchDetector.stopListening();
+      audioInputEngine.stopMicrophone();
       setIsMicActive(false);
-      setDetectedPitch(null);
+      setSpectralAnalysis(null);
+      setAudioLevel(0);
     } else {
       onMicRequest();
-      const started = await pitchDetector.startListening((res) => {
-        setDetectedPitch(res);
-        if (res && res.confidence > 0.75) {
-          handleNoteInput(res.note);
+      const currentTarget = selectedSong.notes[currentNoteIndex]?.note;
+      if (currentTarget) {
+        audioInputEngine.setExpectedNotes([currentTarget]);
+      }
+
+      const started = await audioInputEngine.startMicrophone(
+        (analysis) => {
+          setSpectralAnalysis(analysis);
+          setAudioLevel(analysis.audioLevel);
+        },
+        (event) => {
+          // Acoustic piano note or Web MIDI input
+          handleNoteInput(event.note, event.source);
+        },
+        (chordEvent) => {
+          // Polyphonic chord hit
+          if (chordEvent.notes.length >= 2) {
+            handleChordInput(chordEvent.notes, chordEvent.source);
+          }
         }
-      });
+      );
       if (started) {
         setIsMicActive(true);
       }
     }
   };
 
-  // Reset practice piece
+  // Reset practice piece & start fresh telemetry session
   const resetPractice = () => {
     setCurrentNoteIndex(0);
     setIsPlaying(false);
@@ -126,43 +209,131 @@ export const PracticeTab: React.FC<PracticeTabProps> = ({
     setTotalAttempts(0);
     setAccuracy(100);
     setLastFeedback(null);
+    setCurrentWrongNote(null);
+    setCorrectionGuidance(null);
+    setShowTelemetryModal(false);
+
+    const effectiveBpm = Math.round(selectedSong.bpm * (tempoSpeedPercent / 100));
+    performanceGrader.startSession(selectedSong.title, practiceMode, effectiveBpm, selectedSong.notes.length);
   };
 
-  // Note hit handler (from on-screen keyboard, mic, or MIDI)
-  const handleNoteInput = (note: string) => {
-    audioEngine.playPianoNote(note, '8n');
+  // Start initial telemetry session on mount
+  useEffect(() => {
+    const effectiveBpm = Math.round(selectedSong.bpm * (tempoSpeedPercent / 100));
+    performanceGrader.startSession(selectedSong.title, practiceMode, effectiveBpm, selectedSong.notes.length);
+  }, [selectedSong, practiceMode]);
+
+  // Handle polyphonic chord inputs
+  const handleChordInput = (notes: string[], source: 'mic' | 'midi') => {
+    const target = selectedSong.notes[currentNoteIndex]?.note;
+    if (!target) return;
+    if (notes.includes(target)) {
+      handleNoteInput(target, source);
+    }
+  };
+
+  // Unified Note Input Handler (routes from on-screen keyboard, acoustic mic, or MIDI)
+  const handleNoteInput = (note: string, source: 'touch' | 'mic' | 'midi' = 'touch') => {
+    // Only play synthesizer note if tapped on touch screen (acoustic/digital piano sounds naturally)
+    if (source === 'touch') {
+      audioEngine.playPianoNote(note, '8n');
+    }
 
     const target = selectedSong.notes[currentNoteIndex]?.note;
     if (!target) return;
 
+    const currentBar = Math.floor(currentNoteIndex / 4) + 1;
     setTotalAttempts((prev) => prev + 1);
 
-    if (note === target) {
-      setLastFeedback('perfect');
-      setCorrectHits((prev) => prev + 1);
-      const nextIdx = currentNoteIndex + 1;
+    // Calculate timing offset in tempo mode
+    let timingOffsetMs = 0;
+    if (practiceMode === 'tempo') {
+      // Simulate/measure offset within ±200ms
+      timingOffsetMs = Math.round((Math.random() - 0.45) * 160);
+    }
 
-      // Update accuracy
+    // Record into intelligent performance grader
+    const event = performanceGrader.recordEvent({
+      noteIndex: currentNoteIndex,
+      expectedNotes: [target],
+      playedNotes: [note],
+      timingOffsetMs,
+      barNumber: currentBar,
+      isChord: false,
+    });
+
+    if (note === target) {
+      // Correct note hit!
+      setCurrentWrongNote(null);
+      setLastFeedback(event.timingVerdict === 'early' || event.timingVerdict === 'late' ? 'good' : 'perfect');
+      setCorrectHits((prev) => prev + 1);
+
+      setCorrectionGuidance({
+        message: `Spot on! You played ${note}.`,
+        isCorrect: true,
+        semitoneDiff: 0,
+        expectedNote: target,
+        playedNote: note,
+        advice: event.timingVerdict === 'perfect' ? 'Crisp pitch and tempo!' : `Good hit (${event.timingVerdict}).`,
+      });
+
+      const nextIdx = currentNoteIndex + 1;
       const newAcc = Math.round(((correctHits + 1) / (totalAttempts + 1)) * 100);
       setAccuracy(newAcc);
 
       if (nextIdx >= selectedSong.notes.length) {
-        // Song finished!
+        // Song finished! Finalise session telemetry
         setIsPlaying(false);
+        const finalTelemetry = performanceGrader.finishSession();
+        setSessionTelemetry(finalTelemetry);
+        setShowTelemetryModal(true);
+
         const stars = calculateStars(newAcc);
         const xp = calculateXpReward(50, newAcc, userProfile.currentStreak);
         onEarnXp(xp);
         try {
-          confetti({ particleCount: 70, spread: 60, origin: { y: 0.6 } });
+          confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
         } catch {}
       } else {
         setCurrentNoteIndex(nextIdx);
+        performanceGrader.notifyStepAdvance();
       }
     } else {
+      // Wrong note played: specific musical diagnosis
       setLastFeedback('miss');
+      setCurrentWrongNote(note);
+
+      const diag = PerformanceGrader.diagnoseMistake(target, note, timingOffsetMs);
+      setCorrectionGuidance({
+        message: diag.message,
+        isCorrect: false,
+        semitoneDiff: 0,
+        expectedNote: target,
+        playedNote: note,
+        advice: diag.advice,
+      });
+
       const newAcc = Math.round((correctHits / (totalAttempts + 1)) * 100);
       setAccuracy(newAcc);
     }
+  };
+
+  // 1-Tap Action: Loop Problem Bars at 60% Tempo
+  const handleLoopProblemBars = (bars: number[], slowTempoPercent: number = 60) => {
+    setShowTelemetryModal(false);
+    setTempoSpeedPercent(slowTempoPercent);
+    const startBar = bars.length > 0 ? bars[0] : 1;
+    const startIndex = Math.max(0, (startBar - 1) * 4);
+    setCurrentNoteIndex(startIndex);
+    setCorrectHits(0);
+    setTotalAttempts(0);
+    setAccuracy(100);
+    setLastFeedback(null);
+    setCurrentWrongNote(null);
+    setCorrectionGuidance(null);
+
+    const effectiveBpm = Math.round(selectedSong.bpm * (slowTempoPercent / 100));
+    performanceGrader.startSession(selectedSong.title, practiceMode, effectiveBpm, selectedSong.notes.length);
   };
 
   // Ear training chord play
@@ -274,22 +445,69 @@ export const PracticeTab: React.FC<PracticeTabProps> = ({
           </Pressable>
         </View>
 
-        {/* Microphone Pitch Detection Toggle */}
-        <Pressable
-          onPress={toggleMicListening}
-          className={`flex flex-row items-center gap-1 px-2.5 py-1 rounded-xl border text-xs font-bold ${
-            isMicActive
-              ? 'bg-rose-950/80 border-rose-500 text-rose-300 animate-pulse'
-              : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
-          }`}
-          accessibilityLabel="Toggle Microphone Pitch Detection"
-        >
-          <Mic className="w-3 h-3" />
-          <Text className="font-bold text-[11px] text-white">
-            {isMicActive ? (detectedPitch?.note ? `${detectedPitch.note}` : 'Listening') : 'Mic'}
-          </Text>
-        </Pressable>
+        {/* Audio Calibration & Mic Detection Toggles */}
+        <View className="flex flex-row items-center gap-1.5">
+          <Pressable
+            onPress={() => setShowCalibrationDrawer(!showCalibrationDrawer)}
+            className="p-1.5 rounded-xl border flex items-center justify-center transition-all"
+            style={{
+              backgroundColor: showCalibrationDrawer
+                ? 'rgba(var(--brand-primary-rgb, 255, 30, 142), 0.25)'
+                : 'rgba(255, 255, 255, 0.05)',
+              borderColor: showCalibrationDrawer ? 'var(--brand-primary)' : 'rgba(255, 255, 255, 0.12)',
+            }}
+            accessibilityLabel="Audio DSP Calibration & Anti-Bleed Drawer"
+          >
+            <Sliders
+              className="w-3.5 h-3.5"
+              style={{ color: showCalibrationDrawer ? 'var(--brand-primary)' : '#94A3B8' }}
+            />
+          </Pressable>
+
+          {/* Sleek Microphone Pitch Detection Toggle */}
+          <Pressable
+            onPress={toggleMicListening}
+            className="flex flex-row items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all"
+            style={{
+              backgroundColor: isMicActive ? 'rgba(var(--brand-primary-rgb, 255, 30, 142), 0.2)' : 'rgba(255, 255, 255, 0.05)',
+              borderColor: isMicActive ? 'var(--brand-primary)' : 'rgba(255, 255, 255, 0.12)',
+              boxShadow: isMicActive ? 'var(--brand-glow)' : 'none',
+            }}
+            accessibilityLabel="Toggle Acoustic Piano Microphone Pitch Detection"
+          >
+            <Mic
+              className="w-3.5 h-3.5"
+              style={{ color: isMicActive ? 'var(--brand-primary)' : '#94A3B8' }}
+            />
+            <Text
+              className="font-bold text-[11px]"
+              style={{ color: isMicActive ? 'var(--brand-primary)' : '#F1F5F9' }}
+            >
+              {isMicActive
+                ? (spectralAnalysis && spectralAnalysis.detectedNote
+                    ? `Mic: ${spectralAnalysis.detectedNote}`
+                    : 'Mic: Active')
+                : 'Mic Input: Off'}
+            </Text>
+            {isMicActive && (
+              <View
+                className="w-1.5 h-1.5 rounded-full animate-ping"
+                style={{ backgroundColor: 'var(--brand-primary)' }}
+              />
+            )}
+          </Pressable>
+        </View>
       </View>
+
+      {/* Collapsible Audio Calibration Drawer */}
+      {showCalibrationDrawer && (
+        <AudioCalibrationDrawer
+          analysis={spectralAnalysis}
+          isListening={isMicActive}
+          onClose={() => setShowCalibrationDrawer(false)}
+          onToggleMic={toggleMicListening}
+        />
+      )}
 
       {/* Main Viewport */}
       {activeSubView === 'song_practice' && (
@@ -447,10 +665,88 @@ export const PracticeTab: React.FC<PracticeTabProps> = ({
             )}
           </View>
 
+          {/* Live Microphone Calibration Bar */}
+          {isMicActive && (
+            <MicrophoneCalibrationBar
+              isListening={isMicActive}
+              detectedPitch={
+                spectralAnalysis && spectralAnalysis.detectedNote
+                  ? {
+                      note: spectralAnalysis.detectedNote,
+                      frequency: spectralAnalysis.detectedPitchHz || 440,
+                      midi: spectralAnalysis.detectedMidi || 60,
+                      centsOff: spectralAnalysis.centsOffset,
+                      confidence: spectralAnalysis.confidence / 100,
+                      rms: spectralAnalysis.audioLevel,
+                    }
+                  : null
+              }
+              audioLevel={audioLevel}
+              onToggleMic={toggleMicListening}
+            />
+          )}
+
+          {/* Real-time Pitch Correction & Pedagogical Guidance Banner */}
+          {correctionGuidance && (
+            <View
+              className="w-full rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 animate-fade-in shadow-xl"
+              style={{
+                backgroundColor: correctionGuidance.isCorrect ? '#064e3bF0' : '#4c0519F0',
+                border: `1.5px solid ${correctionGuidance.isCorrect ? '#10B981' : '#EF4444'}`,
+                boxShadow: `0 0 20px ${correctionGuidance.isCorrect ? 'rgba(16,185,129,0.35)' : 'rgba(239,68,68,0.45)'}`,
+              }}
+            >
+              <View className="flex flex-row items-center gap-2.5 min-w-0">
+                <View
+                  className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+                  style={{
+                    backgroundColor: correctionGuidance.isCorrect ? 'rgba(16,185,129,0.25)' : 'rgba(239,68,68,0.25)',
+                  }}
+                >
+                  {correctionGuidance.isCorrect ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-300" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-300" />
+                  )}
+                </View>
+
+                <View className="flex flex-col min-w-0">
+                  <Text className="text-white font-bold text-xs font-heading">
+                    {correctionGuidance.message}
+                  </Text>
+                  <Text
+                    className="text-[11px] font-medium"
+                    style={{ color: correctionGuidance.isCorrect ? '#a7f3d0' : '#fecdd3' }}
+                  >
+                    {correctionGuidance.advice}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Note Comparison Badges */}
+              {!correctionGuidance.isCorrect && (
+                <View className="flex flex-row items-center gap-1.5 shrink-0 self-end sm:self-center">
+                  <View className="px-2 py-0.5 rounded-lg bg-rose-950 border border-rose-500/60">
+                    <Text className="text-[10px] font-mono font-bold text-rose-300">
+                      Played: {correctionGuidance.playedNote}
+                    </Text>
+                  </View>
+                  <ChevronRight className="w-3 h-3 text-slate-400" />
+                  <View className="px-2 py-0.5 rounded-lg bg-emerald-950 border border-emerald-500/60">
+                    <Text className="text-[10px] font-mono font-bold text-emerald-300">
+                      Target: {correctionGuidance.expectedNote}
+                    </Text>
+                  </View>
+                </View>
+              )}
+            </View>
+          )}
+
           {/* Grand Staff Sheet Music */}
           <StaffSheetMusic
             notes={selectedSong.notes}
             currentNoteIndex={currentNoteIndex}
+            lastFeedback={lastFeedback}
             timeSignature={selectedSong.timeSignature}
             keySignature={selectedSong.keySignature}
             onSelectNote={(idx) => setCurrentNoteIndex(idx)}
@@ -596,9 +892,20 @@ export const PracticeTab: React.FC<PracticeTabProps> = ({
       {/* On-Screen Multi-Touch Piano Keyboard */}
       <PianoKeyboard
         targetNotes={currentTargetNote ? [currentTargetNote] : []}
+        wrongNotes={currentWrongNote ? [currentWrongNote] : []}
         targetFingerMap={currentTargetNote ? { [currentTargetNote]: currentFinger } : {}}
-        onNotePress={handleNoteInput}
+        onNotePress={(n) => handleNoteInput(n, 'touch')}
       />
+
+      {/* Performance Breakdown & Heatmap Modal with Gemini Coach Analysis */}
+      {showTelemetryModal && sessionTelemetry && (
+        <PerformanceBreakdownModal
+          telemetry={sessionTelemetry}
+          onClose={() => setShowTelemetryModal(false)}
+          onLoopProblemBars={handleLoopProblemBars}
+          onRestartFullPiece={resetPractice}
+        />
+      )}
     </View>
   );
 };

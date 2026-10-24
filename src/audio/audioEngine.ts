@@ -17,6 +17,7 @@ class AudioEngine {
   private drumHihatOpen: Tone.MetalSynth | null = null;
   private drumPerc: Tone.MembraneSynth | null = null;
   private masterLimiter: Tone.Limiter | null = null;
+  private speakerBleedMuted: boolean = false;
 
   async ensureAudioContext(): Promise<boolean> {
     try {
@@ -141,7 +142,21 @@ class AudioEngine {
     }).connect(this.masterLimiter);
   }
 
+  setSpeakerBleedProtection(enabled: boolean) {
+    this.speakerBleedMuted = enabled;
+    if (this.pianoSynth) {
+      try {
+        this.pianoSynth.volume.value = enabled ? -100 : -4;
+      } catch {}
+    }
+  }
+
+  isSpeakerBleedProtectionEnabled(): boolean {
+    return this.speakerBleedMuted;
+  }
+
   triggerPianoAttack(note: string, velocity: number = 0.8) {
+    if (this.speakerBleedMuted) return;
     this.ensureAudioContext();
     try {
       if (this.pianoSynth) {
@@ -151,6 +166,7 @@ class AudioEngine {
   }
 
   triggerPianoRelease(note: string) {
+    if (this.speakerBleedMuted) return;
     try {
       if (this.pianoSynth) {
         this.pianoSynth.triggerRelease(note, Tone.now() + 0.05);
@@ -159,6 +175,7 @@ class AudioEngine {
   }
 
   playPianoNote(note: string, duration: string = '8n', velocity: number = 0.8) {
+    if (this.speakerBleedMuted) return;
     this.ensureAudioContext();
     try {
       if (this.pianoSynth) {

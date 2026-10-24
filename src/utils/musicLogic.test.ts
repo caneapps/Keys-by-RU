@@ -12,6 +12,7 @@ import {
   calculateLevel,
   calculateDailyProgress,
   evaluateStreakOnPractice,
+  getPitchCorrectionGuidance,
 } from './musicLogic.ts';
 
 test('noteToMidi converts standard notes correctly', () => {
@@ -118,5 +119,40 @@ test('evaluateStreakOnPractice updates streak appropriately', () => {
     newStreak: 1,
     isFirstPracticeToday: true,
   });
+});
+
+test('getPitchCorrectionGuidance provides exact feedback for identical notes', () => {
+  const result = getPitchCorrectionGuidance('C4', 'C4');
+  assert.equal(result.isCorrect, true);
+  assert.equal(result.semitoneDiff, 0);
+  assert.match(result.message, /Spot on/);
+});
+
+test('getPitchCorrectionGuidance detects adjacent keys and directions', () => {
+  // D4 played when C4 expected (+2 semitones)
+  const leftStep = getPitchCorrectionGuidance('C4', 'D4');
+  assert.equal(leftStep.isCorrect, false);
+  assert.equal(leftStep.semitoneDiff, 2);
+  assert.match(leftStep.message, /one white key to the left/);
+
+  // C4 played when D4 expected (-2 semitones)
+  const rightStep = getPitchCorrectionGuidance('D4', 'C4');
+  assert.equal(rightStep.isCorrect, false);
+  assert.equal(rightStep.semitoneDiff, -2);
+  assert.match(rightStep.message, /one white key to the right/);
+});
+
+test('getPitchCorrectionGuidance highlights accidental/sharp missteps', () => {
+  const sharpCheck = getPitchCorrectionGuidance('F#4', 'F4');
+  assert.equal(sharpCheck.isCorrect, false);
+  assert.match(sharpCheck.message, /Watch the sharp/);
+  assert.match(sharpCheck.advice, /black key/);
+});
+
+test('getPitchCorrectionGuidance detects octave mismatch', () => {
+  const octaveCheck = getPitchCorrectionGuidance('C4', 'C5');
+  assert.equal(octaveCheck.isCorrect, false);
+  assert.equal(octaveCheck.semitoneDiff, 12);
+  assert.match(octaveCheck.message, /wrong octave/);
 });
 

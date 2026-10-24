@@ -7,6 +7,7 @@ import { haptics } from '../utils/haptics.ts';
 interface PianoKeyboardProps {
   activeNotes?: string[]; // notes currently pressed or triggered
   targetNotes?: string[]; // notes user needs to press for practice/lesson
+  wrongNotes?: string[]; // notes played incorrectly for immediate pitch correction
   targetFingerMap?: Record<string, number>; // e.g. { "C4": 1, "E4": 3 }
   onNotePress: (note: string) => void;
   onNoteRelease?: (note: string) => void;
@@ -27,6 +28,7 @@ interface KeyConfig {
 export const PianoKeyboard: React.FC<PianoKeyboardProps> = ({
   activeNotes = [],
   targetNotes = [],
+  wrongNotes = [],
   targetFingerMap = {},
   onNotePress,
   onNoteRelease,
@@ -163,6 +165,7 @@ export const PianoKeyboard: React.FC<PianoKeyboardProps> = ({
 
               const isWhiteActive = currentlyPressed.has(fullWhiteNote) || activeNotes.includes(fullWhiteNote);
               const isWhiteTarget = targetNotes.includes(fullWhiteNote);
+              const isWhiteWrong = wrongNotes.includes(fullWhiteNote);
               const whiteFinger = targetFingerMap[fullWhiteNote];
               const whiteColour = getNoteColour(whiteName);
 
@@ -182,11 +185,19 @@ export const PianoKeyboard: React.FC<PianoKeyboardProps> = ({
                             boxShadow: 'var(--brand-glow)',
                             borderColor: 'var(--brand-primary)',
                           }
+                        : isWhiteWrong
+                        ? {
+                            backgroundColor: '#4c0519',
+                            borderColor: '#ef4444',
+                            boxShadow: '0 0 10px rgba(239, 68, 68, 0.5)',
+                          }
                         : {}),
                     }}
                     className={`relative rounded-b-lg border-x border-b transition-all flex flex-col justify-end items-center pb-2 ${
                       isWhiteActive
                         ? 'scale-[0.98]'
+                        : isWhiteWrong
+                        ? 'ring-2 ring-rose-500 text-rose-300'
                         : isWhiteTarget
                         ? 'bg-amber-50 border-amber-400 shadow-md ring-2 ring-amber-400/50'
                         : 'bg-gradient-to-b from-slate-100 via-white to-slate-200 border-slate-300 shadow-sm active:bg-slate-300'
@@ -194,8 +205,15 @@ export const PianoKeyboard: React.FC<PianoKeyboardProps> = ({
                     accessibilityLabel={`Piano Key ${fullWhiteNote}`}
                   >
                     {/* Target highlight pulsing glow */}
-                    {isWhiteTarget && (
+                    {isWhiteTarget && !isWhiteWrong && (
                       <View className="absolute top-2 w-3 h-3 rounded-full bg-amber-500 animate-ping" />
+                    )}
+
+                    {/* Wrong note indicator dot */}
+                    {isWhiteWrong && (
+                      <View className="absolute top-2 px-1 py-0.5 rounded bg-rose-600">
+                        <Text className="text-[8px] font-bold text-white uppercase">Wrong</Text>
+                      </View>
                     )}
 
                     {/* Finger Number Guide */}
@@ -216,7 +234,7 @@ export const PianoKeyboard: React.FC<PianoKeyboardProps> = ({
                         )}
                         <Text
                           className={`font-bold text-xs tracking-tight ${
-                            isWhiteActive ? 'text-slate-950 font-black' : 'text-slate-900'
+                            isWhiteActive ? 'text-slate-950 font-black' : isWhiteWrong ? 'text-rose-200' : 'text-slate-900'
                           }`}
                         >
                           {fullWhiteNote}
@@ -226,7 +244,9 @@ export const PianoKeyboard: React.FC<PianoKeyboardProps> = ({
                   </Pressable>
 
                   {/* Black Key Overlay */}
-                  {fullBlackNote && (
+                  {fullBlackNote && (() => {
+                    const isBlackWrong = wrongNotes.includes(fullBlackNote);
+                    return (
                     <Pressable
                       onPointerDown={() => handlePointerDown(fullBlackNote)}
                       onPointerUp={() => handlePointerUp(fullBlackNote)}
@@ -244,11 +264,19 @@ export const PianoKeyboard: React.FC<PianoKeyboardProps> = ({
                               boxShadow: 'var(--brand-glow)',
                               borderColor: 'var(--brand-primary)',
                             }
+                          : isBlackWrong
+                          ? {
+                              backgroundColor: '#881337',
+                              borderColor: '#ef4444',
+                              boxShadow: '0 0 10px rgba(239, 68, 68, 0.6)',
+                            }
                           : {}),
                       }}
                       className={`rounded-b-md shadow-xl transition-all flex flex-col justify-end items-center pb-1.5 border-x border-b ${
                         currentlyPressed.has(fullBlackNote) || activeNotes.includes(fullBlackNote)
                           ? 'scale-[0.98]'
+                          : isBlackWrong
+                          ? 'ring-2 ring-rose-500'
                           : targetNotes.includes(fullBlackNote)
                           ? 'bg-amber-600 border-amber-400 ring-2 ring-amber-400/60'
                           : 'bg-gradient-to-b from-neutral-800 to-black border-neutral-900 active:bg-neutral-800'
@@ -267,6 +295,8 @@ export const PianoKeyboard: React.FC<PianoKeyboardProps> = ({
                           className={`font-semibold text-[9px] scale-90 ${
                             currentlyPressed.has(fullBlackNote) || activeNotes.includes(fullBlackNote)
                               ? 'text-slate-950 font-black'
+                              : isBlackWrong
+                              ? 'text-rose-200 font-bold'
                               : 'text-slate-200'
                           }`}
                         >
@@ -274,10 +304,10 @@ export const PianoKeyboard: React.FC<PianoKeyboardProps> = ({
                         </Text>
                       )}
                     </Pressable>
-                  )}
+                  );})()}
                 </View>
               );
-          })}
+            })}
         </View>
       </View>
     </View>

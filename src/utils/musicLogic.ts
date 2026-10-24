@@ -203,3 +203,115 @@ export function evaluateStreakOnPractice(
 
   return { newStreak: currentStreak, isFirstPracticeToday: false };
 }
+
+export interface PitchCorrectionGuidance {
+  message: string;
+  isCorrect: boolean;
+  semitoneDiff: number;
+  expectedNote: string;
+  playedNote: string;
+  advice: string;
+}
+
+/**
+ * Provides real-time pedagogical pitch guidance when a musician plays a note on piano.
+ * Uses British English terminology and spatial keyboard orientation (left/right, semitones, octaves).
+ */
+export function getPitchCorrectionGuidance(expectedNote: string, playedNote: string): PitchCorrectionGuidance {
+  const expectedMidi = noteToMidi(expectedNote);
+  const playedMidi = noteToMidi(playedNote);
+  const diff = playedMidi - expectedMidi;
+
+  if (diff === 0) {
+    return {
+      message: `Spot on! You played ${expectedNote}.`,
+      isCorrect: true,
+      semitoneDiff: 0,
+      expectedNote,
+      playedNote,
+      advice: 'Crisp pitch hit!',
+    };
+  }
+
+  // Same pitch class, different octave
+  if (Math.abs(diff) % 12 === 0) {
+    const octaves = Math.abs(diff) / 12;
+    const direction = diff > 0 ? 'lower' : 'higher';
+    return {
+      message: `Right note, wrong octave! You played ${playedNote} — target is ${expectedNote}.`,
+      isCorrect: false,
+      semitoneDiff: diff,
+      expectedNote,
+      playedNote,
+      advice: `Try ${expectedNote} (${octaves} octave${octaves > 1 ? 's' : ''} ${direction}, ${octaves * 7} white keys away).`,
+    };
+  }
+
+  // Accidental confusion (e.g. F vs F#)
+  const expectedBase = expectedNote.replace(/\d+$/, '');
+  const playedBase = playedNote.replace(/\d+$/, '');
+  if (expectedBase.includes('#') && !playedBase.includes('#') && Math.abs(diff) === 1) {
+    return {
+      message: `Watch the sharp: play ${expectedNote} instead of ${playedNote}.`,
+      isCorrect: false,
+      semitoneDiff: diff,
+      expectedNote,
+      playedNote,
+      advice: `Play ${expectedNote} on the black key immediately ${diff < 0 ? 'to the right' : 'to the left'}.`,
+    };
+  }
+
+  // 1 or 2 semitones away (adjacent keys)
+  if (diff === 1) {
+    return {
+      message: `You played ${playedNote} — try ${expectedNote} (one half-step lower).`,
+      isCorrect: false,
+      semitoneDiff: diff,
+      expectedNote,
+      playedNote,
+      advice: `Move one key to the left for ${expectedNote}.`,
+    };
+  }
+  if (diff === -1) {
+    return {
+      message: `You played ${playedNote} — try ${expectedNote} (one half-step higher).`,
+      isCorrect: false,
+      semitoneDiff: diff,
+      expectedNote,
+      playedNote,
+      advice: `Move one key to the right for ${expectedNote}.`,
+    };
+  }
+  if (diff === 2) {
+    return {
+      message: `You played ${playedNote} — try ${expectedNote} (one white key to the left).`,
+      isCorrect: false,
+      semitoneDiff: diff,
+      expectedNote,
+      playedNote,
+      advice: `Step left to reach ${expectedNote}.`,
+    };
+  }
+  if (diff === -2) {
+    return {
+      message: `You played ${playedNote} — try ${expectedNote} (one white key to the right).`,
+      isCorrect: false,
+      semitoneDiff: diff,
+      expectedNote,
+      playedNote,
+      advice: `Step right to reach ${expectedNote}.`,
+    };
+  }
+
+  const direction = diff > 0 ? 'lower' : 'higher';
+  const distance = Math.abs(diff);
+  return {
+    message: `You played ${playedNote} — target is ${expectedNote}.`,
+    isCorrect: false,
+    semitoneDiff: diff,
+    expectedNote,
+    playedNote,
+    advice: `Aim ${distance} semitones ${direction} to find ${expectedNote}.`,
+  };
+}
+

@@ -30,6 +30,7 @@ import {
 import { Logo } from '../Logo.tsx';
 import { useProfile } from '../../context/ProfileContext.tsx';
 import { NEON_THEMES, NEON_THEME_LIST } from '../../theme/neonThemes.ts';
+import { WeeklyProgressChart } from '../WeeklyProgressChart.tsx';
 
 interface ProfileTabProps {
   userProfile: UserProfile;
@@ -273,6 +274,18 @@ export const ProfileTab: React.FC<ProfileTabProps> = ({
           </View>
         </View>
       </View>
+
+      {/* Weekly Progress Recharts Chart: Daily XP Targets vs. Actuals */}
+      <WeeklyProgressChart
+        userProfile={userProfile}
+        onAdjustTarget={() => {
+          setEditName(userProfile.name);
+          setEditAvatar(userProfile.avatar);
+          setEditDailyGoalMinutes(userProfile.dailyGoalMinutes);
+          setEditDailyXpTarget(userProfile.dailyXpTarget || 60);
+          setShowEditModal(true);
+        }}
+      />
 
       {/* Account Switcher Section (Multi-Profile Support) */}
       <View className="bg-[#161021] border border-[#FF1E8E]/20 rounded-3xl p-5 shadow-xl flex flex-col gap-3">

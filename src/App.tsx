@@ -87,6 +87,12 @@ function AppContent() {
     }
   }, [isLoading]);
 
+  const handleMicRequest = useCallback(() => {
+    if (!localStorage.getItem('kbr_mic_explained')) {
+      setShowMicPrompt(true);
+    }
+  }, []);
+
   const handleLessonSelect = (lesson: Lesson) => {
     audioEngine.ensureAudioContext();
     setActiveLesson(lesson);
@@ -179,7 +185,7 @@ function AppContent() {
           <PracticeTab
             userProfile={currentProfile}
             initialSong={selectedSongForPractice}
-            onMicRequest={() => setShowMicPrompt(true)}
+            onMicRequest={handleMicRequest}
             onEarnXp={handleEarnXp}
           />
         )}
@@ -275,6 +281,7 @@ function AppContent() {
           streak={currentProfile.currentStreak}
           onClose={() => setActiveLesson(null)}
           onLessonComplete={handleLessonComplete}
+          onMicRequest={handleMicRequest}
           colourCodedNotes={currentProfile.settings.colourCodedNotes}
           showNoteNames={currentProfile.settings.showNoteNames}
         />
@@ -291,7 +298,10 @@ function AppContent() {
       {/* Microphone Permission Explanatory Dialog */}
       {showMicPrompt && (
         <MicrophonePermissionModal
-          onConfirm={() => setShowMicPrompt(false)}
+          onConfirm={() => {
+            localStorage.setItem('kbr_mic_explained', 'true');
+            setShowMicPrompt(false);
+          }}
           onCancel={() => setShowMicPrompt(false)}
         />
       )}

@@ -5,9 +5,34 @@ import { StaffSheetMusic } from './StaffSheetMusic.tsx';
 import { FallingNotesView } from './FallingNotesView.tsx';
 import { PianoKeyboard } from './PianoKeyboard.tsx';
 import { audioEngine } from '../audio/audioEngine.ts';
-import { calculateStars, calculateXpReward } from '../utils/musicLogic.ts';
+import {
+  audioInputEngine,
+  SpectralAnalysisResult,
+} from '../services/audioInputEngine.ts';
+import {
+  performanceGrader,
+  PerformanceGrader,
+} from '../services/performanceGrader.ts';
+import {
+  calculateStars,
+  calculateXpReward,
+  getPitchCorrectionGuidance,
+  PitchCorrectionGuidance,
+} from '../utils/musicLogic.ts';
+import { MicrophoneCalibrationBar } from './MicrophoneCalibrationBar.tsx';
 import { geminiCoach } from '../services/gemini.ts';
-import { X, Play, Award, CheckCircle2, ChevronRight, HelpCircle, Star, Sparkles } from 'lucide-react';
+import {
+  X,
+  Play,
+  Award,
+  CheckCircle2,
+  ChevronRight,
+  HelpCircle,
+  Star,
+  Sparkles,
+  Mic,
+  AlertCircle,
+} from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface LessonModalProps {
@@ -15,6 +40,7 @@ interface LessonModalProps {
   streak: number;
   onClose: () => void;
   onLessonComplete: (lessonId: string, stars: number, xpEarned: number) => void;
+  onMicRequest?: () => void;
   colourCodedNotes?: boolean;
   showNoteNames?: boolean;
 }
@@ -24,6 +50,7 @@ export const LessonModal: React.FC<LessonModalProps> = ({
   streak,
   onClose,
   onLessonComplete,
+  onMicRequest,
   colourCodedNotes = true,
   showNoteNames = true,
 }) => {
@@ -40,6 +67,15 @@ export const LessonModal: React.FC<LessonModalProps> = ({
   const [wrongNotesList, setWrongNotesList] = useState<string[]>([]);
   const [lastFeedback, setLastFeedback] = useState<'perfect' | 'good' | 'miss' | null>(null);
 
+  // Pitch correction & Real-time guidance
+  const [correctionGuidance, setCorrectionGuidance] = useState<PitchCorrectionGuidance | null>(null);
+  const [currentWrongNote, setCurrentWrongNote] = useState<string | null>(null);
+
+  // Microphone pitch detection state
+  const [isMicActive, setIsMicActive] = useState<boolean>(false);
+  const [spectralAnalysis, setSpectralAnalysis] = useState<SpectralAnalysisResult | null>(null);
+  const [audioLevel, setAudioLevel] = useState<number>(0);
+
   // Quiz state
   const [selectedQuizAnswer, setSelectedQuizAnswer] = useState<number | null>(null);
   const [isQuizSubmitted, setIsQuizSubmitted] = useState<boolean>(false);
@@ -47,12 +83,67 @@ export const LessonModal: React.FC<LessonModalProps> = ({
   // Coach feedback
   const [coachAdvice, setCoachAdvice] = useState<string>('');
 
-  // Clean demo stop on unmount
+  // Clean demo and microphone listening on unmount or phase change away from practice
   useEffect(() => {
     return () => {
       setIsDemoPlaying(false);
+      audioInputEngine.stopMicrophone();
     };
   }, []);
+
+  useEffect(() => {
+    if (phase !== 'practice' && isMicActive) {
+      audioInputEngine.stopMicrophone();
+      setIsMicActive(false);
+      setSpectralAnalysis(null);
+      setAudioLevel(0);
+    } else if (phase === 'practice') {
+      performanceGrader.startSession(lesson.title, 'wait', 90, lesson.practiceNotes.length);
+      const target = lesson.practiceNotes[practiceIndex]?.note;
+      if (target) {
+        audioInputEngine.setExpectedNotes([target]);
+      }
+    }
+  }, [phase, isMicActive]);
+
+  // Sync expected note to DSP engine for template matching
+  useEffect(() => {
+    if (phase === 'practice') {
+      const target = lesson.practiceNotes[practiceIndex]?.note;
+      if (target) {
+        audioInputEngine.setExpectedNotes([target]);
+      }
+    }
+  }, [practiceIndex, phase]);
+
+  // Toggle Microphone Pitch Detection
+  const toggleMicListening = async () => {
+    if (isMicActive) {
+      audioInputEngine.stopMicrophone();
+      setIsMicActive(false);
+      setSpectralAnalysis(null);
+      setAudioLevel(0);
+    } else {
+      onMicRequest?.();
+      const target = lesson.practiceNotes[practiceIndex]?.note;
+      if (target) {
+        audioInputEngine.setExpectedNotes([target]);
+      }
+
+      const started = await audioInputEngine.startMicrophone(
+        (analysis) => {
+          setSpectralAnalysis(analysis);
+          setAudioLevel(analysis.audioLevel);
+        },
+        (event) => {
+          handlePracticeNotePress(event.note, event.source);
+        }
+      );
+      if (started) {
+        setIsMicActive(true);
+      }
+    }
+  };
 
   // Animated keyboard demonstration playback
   const runKeyboardDemo = async () => {
@@ -70,9 +161,12 @@ export const LessonModal: React.FC<LessonModalProps> = ({
     setIsDemoPlaying(false);
   };
 
-  // Handle note pressed during guided practice
-  const handlePracticeNotePress = (pressedNote: string) => {
-    audioEngine.playPianoNote(pressedNote, '8n');
+  // Handle note pressed during guided practice (unified touch & acoustic piano mic input)
+  const handlePracticeNotePress = (pressedNote: string, source: 'touch' | 'mic' | 'midi' = 'touch') => {
+    // Only play synthesizer note if played via touch screen (acoustic piano already emitted acoustic sound)
+    if (source === 'touch') {
+      audioEngine.playPianoNote(pressedNote, '8n');
+    }
 
     if (phase !== 'practice') return;
 
@@ -81,11 +175,23 @@ export const LessonModal: React.FC<LessonModalProps> = ({
 
     if (pressedNote === targetNote) {
       setLastFeedback('perfect');
+      setCurrentWrongNote(null);
+      setCorrectionGuidance({
+        message: `Spot on! You played ${pressedNote}.`,
+        isCorrect: true,
+        semitoneDiff: 0,
+        expectedNote: targetNote,
+        playedNote: pressedNote,
+        advice: 'Crisp pitch hit! Keep your momentum going.',
+      });
+
       const nextIdx = practiceIndex + 1;
       setPracticeIndex(nextIdx);
 
       if (nextIdx >= lesson.practiceNotes.length) {
         // Practice phase successfully completed! Move to mini-quiz
+        audioInputEngine.stopMicrophone();
+        setIsMicActive(false);
         setTimeout(() => {
           setPhase('quiz');
         }, 600);
@@ -94,6 +200,17 @@ export const LessonModal: React.FC<LessonModalProps> = ({
       setLastFeedback('miss');
       setWrongNotesCount((c) => c + 1);
       setWrongNotesList((list) => (list.includes(pressedNote) ? list : [...list, pressedNote]));
+      setCurrentWrongNote(pressedNote);
+
+      const diag = PerformanceGrader.diagnoseMistake(targetNote, pressedNote);
+      setCorrectionGuidance({
+        message: diag.message,
+        isCorrect: false,
+        semitoneDiff: 0,
+        expectedNote: targetNote,
+        playedNote: pressedNote,
+        advice: diag.advice,
+      });
     }
   };
 
@@ -145,6 +262,23 @@ export const LessonModal: React.FC<LessonModalProps> = ({
         </View>
 
         <View className="flex flex-row items-center gap-2">
+          {phase === 'practice' && (
+            <Pressable
+              onPress={toggleMicListening}
+              className={`px-3 py-1 rounded-full flex flex-row items-center gap-1.5 transition-all ${
+                isMicActive
+                  ? 'bg-emerald-500/20 border border-emerald-500 text-emerald-300 shadow-sm shadow-emerald-500/20'
+                  : 'bg-white/5 border border-white/10 text-slate-400 hover:text-slate-200'
+              }`}
+              accessibilityLabel="Toggle Acoustic Piano Microphone Input"
+            >
+              <Mic className={`w-3.5 h-3.5 ${isMicActive ? 'text-emerald-400 animate-pulse' : 'text-slate-400'}`} />
+              <Text className={`text-[11px] font-bold ${isMicActive ? 'text-emerald-300' : 'text-slate-400'}`}>
+                {isMicActive ? 'Mic: LIVE' : 'Mic: OFF'}
+              </Text>
+            </Pressable>
+          )}
+
           <View className="px-2.5 py-1 rounded-full bg-[#FF1E8E]/15 border border-[#FF1E8E]/30">
             <Text className="text-[#FF1E8E] text-xs font-semibold uppercase tracking-wider">
               {phase === 'theory'
@@ -241,6 +375,57 @@ export const LessonModal: React.FC<LessonModalProps> = ({
         {/* Phase 3: Guided Practice */}
         {phase === 'practice' && (
           <View className="flex flex-col gap-3">
+            {/* Live Microphone Calibration VU Bar */}
+            {isMicActive && (
+              <MicrophoneCalibrationBar
+                isListening={isMicActive}
+                detectedPitch={
+                  spectralAnalysis && spectralAnalysis.detectedNote
+                    ? {
+                        note: spectralAnalysis.detectedNote,
+                        frequency: spectralAnalysis.detectedPitchHz || 440,
+                        midi: spectralAnalysis.detectedMidi || 60,
+                        centsOff: spectralAnalysis.centsOffset,
+                        confidence: spectralAnalysis.confidence / 100,
+                        rms: spectralAnalysis.audioLevel,
+                      }
+                    : null
+                }
+                audioLevel={audioLevel}
+                onToggleMic={toggleMicListening}
+              />
+            )}
+
+            {/* Real-time Pitch Correction Guidance Alert */}
+            {correctionGuidance && !correctionGuidance.isCorrect && (
+              <View className="p-3 rounded-2xl bg-rose-950/70 border border-rose-500/40 flex flex-row items-center gap-2.5 shadow-lg shadow-rose-950/50">
+                <View className="w-8 h-8 rounded-xl bg-rose-500/20 flex items-center justify-center shrink-0">
+                  <AlertCircle className="w-4 h-4 text-rose-400" />
+                </View>
+                <View className="flex flex-col flex-1">
+                  <View className="flex flex-row items-center gap-1.5 flex-wrap">
+                    <Text className="text-white text-xs font-bold font-heading">
+                      {correctionGuidance.message}
+                    </Text>
+                    <View className="px-1.5 py-0.2 rounded bg-rose-500/30">
+                      <Text className="text-[10px] text-rose-200 font-mono">
+                        Played: {correctionGuidance.playedNote}
+                      </Text>
+                    </View>
+                    <Text className="text-slate-400 text-[10px]">vs</Text>
+                    <View className="px-1.5 py-0.2 rounded bg-emerald-500/30">
+                      <Text className="text-[10px] text-emerald-300 font-mono">
+                        Target: {correctionGuidance.expectedNote}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text className="text-rose-200/90 text-[11px] mt-0.5 leading-tight">
+                    {correctionGuidance.advice}
+                  </Text>
+                </View>
+              </View>
+            )}
+
             <View className="flex flex-row items-center justify-between px-1">
               <View className="flex flex-row items-center gap-2">
                 <Text className="text-xs text-slate-400">Target Note:</Text>
@@ -262,6 +447,7 @@ export const LessonModal: React.FC<LessonModalProps> = ({
               currentNoteIndex={practiceIndex}
               colourCodedNotes={colourCodedNotes}
               showNoteNames={showNoteNames}
+              lastFeedback={lastFeedback}
             />
 
             {/* Falling notes visualizer */}
@@ -401,6 +587,7 @@ export const LessonModal: React.FC<LessonModalProps> = ({
             : []
         }
         targetNotes={currentTargetNote ? [currentTargetNote] : []}
+        wrongNotes={currentWrongNote ? [currentWrongNote] : []}
         targetFingerMap={targetFingerMap}
         onNotePress={handlePracticeNotePress}
         colourCodedNotes={colourCodedNotes}
